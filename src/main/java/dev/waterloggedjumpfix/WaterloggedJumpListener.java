@@ -27,6 +27,7 @@ final class WaterloggedJumpListener implements Listener {
     private final ClientHorizontalMotionTracker motionTracker;
     private final WaterloggedContactDetector contactDetector;
     private final HorizontalCollisionProbe collisionProbe;
+    private final LegitimateStepDetector stepDetector;
     private final WaterMovementDamping movementDamping;
     private final ClientMotionSuppressor motionSuppressor;
     private final PluginSettings settings;
@@ -37,6 +38,7 @@ final class WaterloggedJumpListener implements Listener {
         final ClientHorizontalMotionTracker motionTracker,
         final WaterloggedContactDetector contactDetector,
         final HorizontalCollisionProbe collisionProbe,
+        final LegitimateStepDetector stepDetector,
         final WaterMovementDamping movementDamping,
         final ClientMotionSuppressor motionSuppressor,
         final PluginSettings settings
@@ -46,6 +48,7 @@ final class WaterloggedJumpListener implements Listener {
         this.motionTracker = motionTracker;
         this.contactDetector = contactDetector;
         this.collisionProbe = collisionProbe;
+        this.stepDetector = stepDetector;
         this.movementDamping = movementDamping;
         this.motionSuppressor = motionSuppressor;
         this.settings = settings;
@@ -95,6 +98,11 @@ final class WaterloggedJumpListener implements Listener {
         }
 
         final Location origin = player.getLocation();
+        if (this.stepDetector.isLegitimateStep(player, origin, event.getTo())) {
+            this.confirmedSuppression.forget(player.getUniqueId());
+            return;
+        }
+
         if (!this.contactDetector.isTouchingTarget(player, origin)
             || !this.collisionProbe.isMovingIntoCollision(
                 player,

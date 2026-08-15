@@ -37,6 +37,7 @@ The cancellation is deliberately narrower than a general anti-jump plugin:
    - no current or recent jump input;
    - no current or recent external velocity;
    - no flight, gliding, riptide, swimming, vehicle, or Levitation state;
+   - movement is not a collision-supported step within the player's effective step-height attribute;
    - water contact with a waterlogged slab or stair beneath the lower player hitbox; and
    - horizontal movement input that points into a collision.
 4. The first matching jump is cancelled and confirms suppression for that wall contact. The fallback correction keeps the newest collision-safe horizontal position and camera direction instead of returning X/Z to Paper's older movement-event location.

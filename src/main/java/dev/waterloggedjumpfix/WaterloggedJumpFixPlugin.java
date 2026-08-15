@@ -22,6 +22,7 @@ public final class WaterloggedJumpFixPlugin extends JavaPlugin {
                 this.motionTracker,
                 new WaterloggedContactDetector(),
                 new HorizontalCollisionProbe(),
+                new LegitimateStepDetector(),
                 new WaterMovementDamping(),
                 new ClientMotionSuppressor(),
                 settings
