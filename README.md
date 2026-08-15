@@ -9,7 +9,7 @@ WaterloggedJumpFix is a small, runtime-dependency-free Paper plugin that works a
 
 ## Install
 
-1. Obtain `WaterloggedJumpFix-x.x.x.jar` from a successful GitHub Actions run, or build it locally as described below.
+1. Download `WaterloggedJumpFix-x.x.x.jar` from the [latest GitHub Release](https://github.com/the-great-chicken/WaterloggedJumpFix/releases/latest), or build it locally as described below.
 2. Put the JAR in the server's `plugins/` directory.
 3. Fully restart the server. Avoid `/reload` and plugin hot-reloaders.
 4. Confirm that the console logs `MC-8959 workaround enabled globally`.
@@ -60,3 +60,7 @@ build/libs/WaterloggedJumpFix-x.x.x.jar
 ```
 
 Unit tests run as part of `build` and of the GitHub Actions workflow.
+
+## Publish a release
+
+Set `pluginVersion` in `gradle.properties`, commit the change, and push a matching tag such as `v1.2.0`. The GitHub Actions workflow validates the tag, runs the tests, builds the versioned JAR, and attaches it to a GitHub Release. Re-running the workflow replaces the existing JAR asset.
