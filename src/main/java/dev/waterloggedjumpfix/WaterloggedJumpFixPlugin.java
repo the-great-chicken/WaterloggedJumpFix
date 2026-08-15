@@ -3,8 +3,8 @@ package dev.waterloggedjumpfix;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
- * Paper workaround for MC-8959 and its waterlogged slab/stair reproduction,
- * MC-174654.
+ * Paper workaround for MC-8959, including its waterlogged slab/stair
+ * reproduction, MC-174654.
  */
 public final class WaterloggedJumpFixPlugin extends JavaPlugin {
     private final RecentPlayerActivity recentActivity = new RecentPlayerActivity();
@@ -20,7 +20,7 @@ public final class WaterloggedJumpFixPlugin extends JavaPlugin {
                 this.recentActivity,
                 this.confirmedSuppression,
                 this.motionTracker,
-                new WaterloggedContactDetector(),
+                new ShallowWaterContactDetector(),
                 new HorizontalCollisionProbe(),
                 new LegitimateStepDetector(),
                 new WaterMovementDamping(),

@@ -1,6 +1,6 @@
 name: WaterloggedJumpFix
 version: '${version}'
 main: dev.waterloggedjumpfix.WaterloggedJumpFixPlugin
-description: Targeted server-side workaround for MC-8959 and MC-174654
+description: Server-side workaround for automatic wall boosts in shallow water
 api-version: '26.1.2'
 load: POSTWORLD

@@ -1,6 +1,6 @@
 # WaterloggedJumpFix
 
-WaterloggedJumpFix is a small, runtime-dependency-free Paper plugin that works around [MC-8959](https://bugs.mojang.com/browse/MC-8959): players can receive an automatic upward boost when moving against a block while in water. It targets the waterlogged slab and stair reproduction reported as [MC-174654](https://bugs.mojang.com/browse/MC-174654), including the case where Auto-Jump is disabled and the obstacle is too tall to climb.
+WaterloggedJumpFix is a small, runtime-dependency-free Paper plugin that works around [MC-8959](https://bugs.mojang.com/browse/MC-8959): players can receive an automatic upward boost when moving against a block in shallow water. It also covers the waterlogged slab and stair reproduction reported as [MC-174654](https://bugs.mojang.com/browse/MC-174654), including the case where Auto-Jump is disabled and the obstacle is too tall to climb.
 
 ## Requirements
 
@@ -38,7 +38,7 @@ The cancellation is deliberately narrower than a general anti-jump plugin:
    - no current or recent external velocity;
    - no flight, gliding, riptide, swimming, vehicle, or Levitation state;
    - movement is not a collision-supported step within the player's effective step-height attribute;
-   - water contact with a waterlogged slab or stair beneath the lower player hitbox; and
+   - the player's body is in water while their eyes remain above the surface; and
    - horizontal movement input that points into a collision.
 4. The first matching jump is cancelled and confirms suppression for that wall contact. The fallback correction keeps the newest collision-safe horizontal position and camera direction instead of returning X/Z to Paper's older movement-event location.
 5. At each `ClientTickEndEvent` while the confirmed condition remains true, the plugin sends a self-only motion packet with Y set to zero. The vanilla client prepares the unwanted `+0.3Y` water-exit impulse for its next tick, so this normally clears the impulse before it moves the camera and retriggers another rollback.

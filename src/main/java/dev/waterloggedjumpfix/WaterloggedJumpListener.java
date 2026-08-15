@@ -25,7 +25,7 @@ final class WaterloggedJumpListener implements Listener {
     private final RecentPlayerActivity recentActivity;
     private final ConfirmedSuppression confirmedSuppression;
     private final ClientHorizontalMotionTracker motionTracker;
-    private final WaterloggedContactDetector contactDetector;
+    private final ShallowWaterContactDetector contactDetector;
     private final HorizontalCollisionProbe collisionProbe;
     private final LegitimateStepDetector stepDetector;
     private final WaterMovementDamping movementDamping;
@@ -36,7 +36,7 @@ final class WaterloggedJumpListener implements Listener {
         final RecentPlayerActivity recentActivity,
         final ConfirmedSuppression confirmedSuppression,
         final ClientHorizontalMotionTracker motionTracker,
-        final WaterloggedContactDetector contactDetector,
+        final ShallowWaterContactDetector contactDetector,
         final HorizontalCollisionProbe collisionProbe,
         final LegitimateStepDetector stepDetector,
         final WaterMovementDamping movementDamping,
@@ -103,7 +103,7 @@ final class WaterloggedJumpListener implements Listener {
             return;
         }
 
-        if (!this.contactDetector.isTouchingTarget(player, origin)
+        if (!this.contactDetector.isInShallowWater(player)
             || !this.collisionProbe.isMovingIntoCollision(
                 player,
                 origin,
@@ -141,7 +141,7 @@ final class WaterloggedJumpListener implements Listener {
         }
 
         final Location origin = player.getLocation();
-        if (!this.contactDetector.isTouchingTarget(player, origin)) {
+        if (!this.contactDetector.isInShallowWater(player)) {
             this.confirmedSuppression.forget(playerId);
             return;
         }
