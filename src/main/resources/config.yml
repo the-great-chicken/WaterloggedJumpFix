@@ -1,0 +1,8 @@
+# Optional collision lookahead in blocks.
+#
+# 0.0 is the conservative default: client motion suppression starts only after
+# an unwanted jump has been positively identified and cancelled once.
+# A small positive value (for example 0.02) allows suppression to begin shortly
+# before contact and may prevent that first correction, at the cost of acting on
+# a prediction that the player will continue moving toward the wall.
+prediction-distance: 0.0

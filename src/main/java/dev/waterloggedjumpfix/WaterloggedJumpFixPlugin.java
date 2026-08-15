@@ -8,25 +8,37 @@ import org.bukkit.plugin.java.JavaPlugin;
  */
 public final class WaterloggedJumpFixPlugin extends JavaPlugin {
     private final RecentPlayerActivity recentActivity = new RecentPlayerActivity();
+    private final ConfirmedSuppression confirmedSuppression = new ConfirmedSuppression();
+    private final ClientHorizontalMotionTracker motionTracker =
+        new ClientHorizontalMotionTracker();
 
     @Override
     public void onEnable() {
+        final PluginSettings settings = PluginSettings.load(this);
         this.getServer().getPluginManager().registerEvents(
             new WaterloggedJumpListener(
                 this.recentActivity,
+                this.confirmedSuppression,
+                this.motionTracker,
                 new WaterloggedContactDetector(),
-                new HorizontalCollisionProbe()
+                new HorizontalCollisionProbe(),
+                new WaterMovementDamping(),
+                new ClientMotionSuppressor(),
+                settings
             ),
             this
         );
 
         this.getLogger().info(
-            "MC-8959 waterlogged slab/stair workaround enabled globally."
+            "MC-8959 workaround enabled globally (prediction-distance: "
+                + settings.predictionDistance() + ")."
         );
     }
 
     @Override
     public void onDisable() {
         this.recentActivity.clear();
+        this.confirmedSuppression.clear();
+        this.motionTracker.clear();
     }
 }

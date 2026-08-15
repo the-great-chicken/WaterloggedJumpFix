@@ -6,14 +6,17 @@ import org.bukkit.entity.Player;
 
 /** Tests a small movement in the direction represented by the current input. */
 final class HorizontalCollisionProbe {
-    private static final double PROBE_DISTANCE = 0.08D;
-
     boolean isMovingIntoCollision(
         final Player player,
         final Location origin,
         final float yaw,
-        final Input input
+        final Input input,
+        final double distance
     ) {
+        if (!Double.isFinite(distance) || distance <= 0.0D) {
+            return false;
+        }
+
         final double forward = axis(input.isForward(), input.isBackward());
         final double sideways = axis(input.isRight(), input.isLeft());
         if (forward == 0.0D && sideways == 0.0D) {
@@ -25,9 +28,9 @@ final class HorizontalCollisionProbe {
         final double z = Math.cos(radians) * forward - Math.sin(radians) * sideways;
         final double length = Math.hypot(x, z);
         final Location probeLocation = origin.clone().add(
-            x / length * PROBE_DISTANCE,
+            x / length * distance,
             0.0D,
-            z / length * PROBE_DISTANCE
+            z / length * distance
         );
 
         return player.collidesAt(probeLocation);
