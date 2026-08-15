@@ -1,9 +1,11 @@
-name: Build plugin
+name: Build and release plugin
 
 on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
 
 permissions:
   contents: read
@@ -17,6 +19,8 @@ jobs:
     name: Build versioned JAR
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - name: Check out repository
@@ -54,3 +58,41 @@ jobs:
           path: build/libs/WaterloggedJumpFix-${{ steps.version.outputs.version }}.jar
           if-no-files-found: error
           retention-days: 90
+
+  release:
+    name: Publish GitHub Release
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+
+    steps:
+      - name: Validate release tag
+        shell: bash
+        run: |
+          expected_tag="v${{ needs.build.outputs.version }}"
+          if [[ "$GITHUB_REF_NAME" != "$expected_tag" ]]; then
+            echo "Release tag must be $expected_tag, got $GITHUB_REF_NAME."
+            exit 1
+          fi
+
+      - name: Download versioned JAR
+        uses: actions/download-artifact@v8
+        with:
+          name: WaterloggedJumpFix-${{ needs.build.outputs.version }}
+          path: release
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          jar="release/WaterloggedJumpFix-${{ needs.build.outputs.version }}.jar"
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$jar" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$jar" --verify-tag --generate-notes --title "WaterloggedJumpFix ${{ needs.build.outputs.version }}"
+          fi

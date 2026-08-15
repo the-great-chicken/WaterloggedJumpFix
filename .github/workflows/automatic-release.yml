@@ -1,0 +1,108 @@
+name: Automatic release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - gradle.properties
+      - .github/workflows/automatic-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: automatic-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publish GitHub release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read project version
+        id: version
+        shell: bash
+        run: |
+          version="$(sed -n 's/^[[:space:]]*pluginVersion[[:space:]]*=[[:space:]]*//p' gradle.properties | tr -d '\r' | tail -n 1)"
+
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Invalid or missing pluginVersion in gradle.properties: '$version'"
+            exit 1
+          fi
+
+          tag="v${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "GitHub release ${tag} already exists; nothing to publish."
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Java 25
+        if: steps.version.outputs.publish == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - name: Set up Gradle
+        if: steps.version.outputs.publish == 'true'
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build and test
+        if: steps.version.outputs.publish == 'true'
+        run: ./gradlew build
+
+      - name: Verify release artifact and existing tag
+        if: steps.version.outputs.publish == 'true'
+        id: artifact
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          jar="build/libs/WaterloggedJumpFix-${VERSION}.jar"
+          if [[ ! -f "$jar" ]]; then
+            echo "::error::Expected release artifact not found: ${jar}"
+            exit 1
+          fi
+
+          if git show-ref --verify --quiet "refs/tags/${TAG}"; then
+            tag_commit="$(git rev-list -n 1 "$TAG")"
+            if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+              echo "::error::Existing tag ${TAG} points to ${tag_commit}, not ${GITHUB_SHA}. Refusing to move it."
+              exit 1
+            fi
+          fi
+
+          echo "jar=${jar}" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag and publish GitHub release
+        if: steps.version.outputs.publish == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          JAR: ${{ steps.artifact.outputs.jar }}
+        run: |
+          gh release create "$TAG" "$JAR" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "WaterloggedJumpFix ${VERSION}" \
+            --generate-notes \
+            --latest
