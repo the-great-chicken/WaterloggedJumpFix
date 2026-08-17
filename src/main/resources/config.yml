@@ -1,8 +1,6 @@
-# Optional collision lookahead in blocks.
-#
-# 0.0 is the conservative default: client motion suppression starts only after
-# an unwanted jump has been positively identified and cancelled once.
-# A small positive value (for example 0.02) allows suppression to begin shortly
-# before contact and may prevent that first correction, at the cost of acting on
-# a prediction that the player will continue moving toward the wall.
-prediction-distance: 0.0
+# Minimum swept collision distance. Latency adds the player's recent horizontal
+# distance per client tick to this value.
+prediction-distance: 0.1
+
+# Maximum distance used by latency-adjusted collision lookahead.
+time-lookahead-max-distance: 0.6

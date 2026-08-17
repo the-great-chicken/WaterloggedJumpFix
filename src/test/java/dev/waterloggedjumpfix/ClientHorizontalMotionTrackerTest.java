@@ -30,6 +30,44 @@ class ClientHorizontalMotionTrackerTest {
             .damped(0.8D);
 
         assertMotion(0.08D, -0.16D, motion);
+        assertMotion(0.1D, -0.2D, this.tracker.latest(this.playerId));
+        assertEquals(Math.hypot(0.1D, -0.2D), motion.speed() / 0.8D, TOLERANCE);
+    }
+
+    @Test
+    void removesOnlyComponentsThatOpposeCurrentInput() {
+        final var motion = new ClientHorizontalMotionTracker.HorizontalMotion(
+            -0.2D,
+            0.3D
+        );
+        final var direction = new HorizontalCollisionProbe.MovementDirection(
+            1.0D,
+            0.0D
+        );
+
+        assertMotion(
+            0.0D,
+            0.3D,
+            motion.withoutOpposingComponents(direction)
+        );
+    }
+
+    @Test
+    void preservesSlidingThatDoesNotOpposeCurrentInput() {
+        final var motion = new ClientHorizontalMotionTracker.HorizontalMotion(
+            0.05D,
+            0.2D
+        );
+        final var direction = new HorizontalCollisionProbe.MovementDirection(
+            0.0D,
+            1.0D
+        );
+
+        assertMotion(
+            0.05D,
+            0.2D,
+            motion.withoutOpposingComponents(direction)
+        );
     }
 
     @Test
@@ -56,6 +94,8 @@ class ClientHorizontalMotionTrackerTest {
     void forgettingPlayerResetsTheSample() {
         this.tracker.observe(this.playerId, this.worldId, 0.0D, 0.0D);
         this.tracker.forget(this.playerId);
+
+        assertMotion(0.0D, 0.0D, this.tracker.latest(this.playerId));
 
         final ClientHorizontalMotionTracker.HorizontalMotion motion =
             this.tracker.observe(this.playerId, this.worldId, 0.1D, 0.0D);

@@ -17,17 +17,20 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerVelocityEvent;
 import org.bukkit.potion.PotionEffectType;
 
-/** Applies the targeted cancellation and maintains its safety exemptions. */
+/** Applies latency-aware motion suppression and maintains its safety exemptions. */
 final class WaterloggedJumpListener implements Listener {
     private static final double CONFIRMED_CONTACT_PROBE_DISTANCE = 0.08D;
-    private static final double MAX_SAFE_ROLLBACK_HORIZONTAL_DISTANCE_SQUARED = 0.25D;
+    private static final double MAX_SAFE_ROLLBACK_HORIZONTAL_DISTANCE_SQUARED =
+        0.25D;
 
     private final RecentPlayerActivity recentActivity;
     private final ConfirmedSuppression confirmedSuppression;
+    private final RecentWallContactTracker recentWallContact;
     private final ClientHorizontalMotionTracker motionTracker;
     private final ShallowWaterContactDetector contactDetector;
     private final HorizontalCollisionProbe collisionProbe;
     private final LegitimateStepDetector stepDetector;
+    private final CollisionLookahead collisionLookahead;
     private final WaterMovementDamping movementDamping;
     private final ClientMotionSuppressor motionSuppressor;
     private final PluginSettings settings;
@@ -35,20 +38,24 @@ final class WaterloggedJumpListener implements Listener {
     WaterloggedJumpListener(
         final RecentPlayerActivity recentActivity,
         final ConfirmedSuppression confirmedSuppression,
+        final RecentWallContactTracker recentWallContact,
         final ClientHorizontalMotionTracker motionTracker,
         final ShallowWaterContactDetector contactDetector,
         final HorizontalCollisionProbe collisionProbe,
         final LegitimateStepDetector stepDetector,
+        final CollisionLookahead collisionLookahead,
         final WaterMovementDamping movementDamping,
         final ClientMotionSuppressor motionSuppressor,
         final PluginSettings settings
     ) {
         this.recentActivity = recentActivity;
         this.confirmedSuppression = confirmedSuppression;
+        this.recentWallContact = recentWallContact;
         this.motionTracker = motionTracker;
         this.contactDetector = contactDetector;
         this.collisionProbe = collisionProbe;
         this.stepDetector = stepDetector;
+        this.collisionLookahead = collisionLookahead;
         this.movementDamping = movementDamping;
         this.motionSuppressor = motionSuppressor;
         this.settings = settings;
@@ -85,49 +92,8 @@ final class WaterloggedJumpListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onJump(final PlayerJumpEvent event) {
         final Player player = event.getPlayer();
-        if (!isEligibleMovementState(player)) {
-            return;
-        }
-
-        final int currentTick = Bukkit.getCurrentTick();
-        final Input input = player.getCurrentInput();
-        if (input.isJump()
-            || this.recentActivity.hasRecentJumpInput(player.getUniqueId(), currentTick)
-            || this.recentActivity.hasRecentExternalVelocity(player.getUniqueId(), currentTick)) {
-            return;
-        }
-
-        final Location origin = player.getLocation();
-        if (this.stepDetector.isLegitimateStep(player, origin, event.getTo())) {
-            this.confirmedSuppression.forget(player.getUniqueId());
-            return;
-        }
-
-        if (!this.contactDetector.isInShallowWater(player)
-            || !this.collisionProbe.isMovingIntoCollision(
-                player,
-                origin,
-                event.getTo().getYaw(),
-                input,
-                CONFIRMED_CONTACT_PROBE_DISTANCE
-            )) {
-            return;
-        }
-
-        this.confirmedSuppression.confirm(player.getUniqueId());
-        event.setFrom(this.selectRollbackLocation(player, origin, event.getTo()));
-        event.setCancelled(true);
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR)
-    public void onClientTickEnd(final ClientTickEndEvent event) {
-        final Player player = event.getPlayer();
-        final ClientHorizontalMotionTracker.HorizontalMotion horizontalMotion =
-            this.motionTracker.observe(player);
         final UUID playerId = player.getUniqueId();
-
         if (!isEligibleMovementState(player)) {
-            this.confirmedSuppression.forget(playerId);
             return;
         }
 
@@ -136,46 +102,238 @@ final class WaterloggedJumpListener implements Listener {
         if (input.isJump()
             || this.recentActivity.hasRecentJumpInput(playerId, currentTick)
             || this.recentActivity.hasRecentExternalVelocity(playerId, currentTick)) {
-            this.confirmedSuppression.forget(playerId);
             return;
         }
 
         final Location origin = player.getLocation();
+        final Location requested = event.getTo();
+        if (this.stepDetector.isLegitimateStep(player, origin, requested)) {
+            this.forgetMovementState(playerId);
+            return;
+        }
+
         if (!this.contactDetector.isInShallowWater(player)) {
-            this.confirmedSuppression.forget(playerId);
             return;
         }
 
-        final boolean confirmed = this.confirmedSuppression.isConfirmed(playerId);
-        final double probeDistance = confirmed
-            ? CONFIRMED_CONTACT_PROBE_DISTANCE
-            : this.settings.predictionDistance();
-        if (!this.collisionProbe.isMovingIntoCollision(
-            player,
-            origin,
-            origin.getYaw(),
-            input,
-            probeDistance
-        )) {
-            if (confirmed) {
-                this.confirmedSuppression.forget(playerId);
-            }
+        final HorizontalCollisionProbe.MovementDirection currentDirection =
+            HorizontalCollisionProbe.movementDirection(
+                requested.getYaw(),
+                input
+            );
+        final RecentWallContactTracker.DirectionResolution effectiveDirection =
+            this.recentWallContact.resolve(
+                playerId,
+                player.getWorld().getUID(),
+                currentDirection
+            );
+        if (!effectiveDirection.isAvailable()
+            || !this.collisionProbe.isMovingIntoCollision(
+                player,
+                origin,
+                effectiveDirection.direction(),
+                CONFIRMED_CONTACT_PROBE_DISTANCE
+            )) {
             return;
         }
 
-        final double damping = this.movementDamping.forPlayer(player);
-        this.motionSuppressor.clearUpwardMotion(
-            player,
-            horizontalMotion.damped(damping)
+        this.confirmedSuppression.confirm(
+            playerId,
+            player.getWorld().getUID(),
+            effectiveDirection.direction(),
+            origin.getY()
         );
+        this.recentWallContact.recordContact(
+            playerId,
+            player.getWorld().getUID(),
+            effectiveDirection.direction()
+        );
+        event.setFrom(this.selectRollbackLocation(player, origin, requested));
+        event.setCancelled(true);
+        this.sendMotionReset(player, effectiveDirection.direction());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onClientTickEnd(final ClientTickEndEvent event) {
+        final Player player = event.getPlayer();
+        final UUID playerId = player.getUniqueId();
+        this.recentWallContact.advanceClientTick(playerId);
+        final ClientHorizontalMotionTracker.HorizontalMotion horizontalMotion =
+            this.motionTracker.observe(player);
+        final int currentTick = Bukkit.getCurrentTick();
+        final Input input = player.getCurrentInput();
+        final Location origin = player.getLocation();
+        final UUID worldId = player.getWorld().getUID();
+        final HorizontalCollisionProbe.MovementDirection currentDirection =
+            HorizontalCollisionProbe.movementDirection(origin.getYaw(), input);
+
+        if (!isEligibleMovementState(player)
+            || input.isJump()
+            || this.recentActivity.hasRecentJumpInput(playerId, currentTick)
+            || this.recentActivity.hasRecentExternalVelocity(playerId, currentTick)) {
+            this.forgetMovementState(playerId);
+            return;
+        }
+
+        if (!this.contactDetector.isInShallowWater(player)) {
+            this.handleOutsideShallowWater(
+                player,
+                playerId,
+                worldId,
+                origin,
+                currentDirection
+            );
+            return;
+        }
+
+        final double lookaheadDistance = this.collisionLookahead.distance(
+            this.settings.predictionDistance(),
+            this.settings.timeLookaheadMaxDistance(),
+            player.getPing(),
+            horizontalMotion
+        );
+        final HorizontalCollisionProbe.CollisionResult predictedCollision =
+            this.collisionProbe.firstCollision(
+                player,
+                origin,
+                currentDirection,
+                lookaheadDistance
+            );
+        final boolean currentCollision = currentDirection.isMoving()
+            && this.collisionProbe.isMovingIntoCollision(
+                player,
+                origin,
+                currentDirection,
+                CONFIRMED_CONTACT_PROBE_DISTANCE
+            );
+
+        if (!this.confirmedSuppression.isConfirmed(playerId)) {
+            if (currentCollision) {
+                this.recentWallContact.recordContact(
+                    playerId,
+                    worldId,
+                    currentDirection
+                );
+            }
+            if (!predictedCollision.collision()) {
+                if (currentDirection.isMoving() && !currentCollision) {
+                    this.recentWallContact.forget(playerId);
+                }
+                return;
+            }
+            this.sendMotionReset(player, currentDirection);
+            return;
+        }
+
+        if (!this.confirmedSuppression.matchesWorld(playerId, worldId)) {
+            this.forgetMovementState(playerId);
+            return;
+        }
+
+        HorizontalCollisionProbe.MovementDirection effectiveDirection =
+            currentDirection;
+        final boolean contactCollision;
+        if (currentDirection.isMoving()) {
+            contactCollision = currentCollision;
+            if (!currentCollision && !predictedCollision.collision()) {
+                this.forgetMovementState(playerId);
+                return;
+            }
+        } else {
+            final RecentWallContactTracker.DirectionResolution recentDirection =
+                this.recentWallContact.resolve(
+                    playerId,
+                    worldId,
+                    currentDirection
+                );
+            if (!recentDirection.isAvailable()) {
+                this.forgetMovementState(playerId);
+                return;
+            }
+            effectiveDirection = recentDirection.direction();
+            contactCollision = this.collisionProbe.isMovingIntoCollision(
+                player,
+                origin,
+                effectiveDirection,
+                CONFIRMED_CONTACT_PROBE_DISTANCE
+            );
+        }
+
+        if (contactCollision || currentDirection.isMoving()) {
+            this.confirmedSuppression.confirm(
+                playerId,
+                worldId,
+                effectiveDirection,
+                origin.getY()
+            );
+            if (contactCollision && currentDirection.isMoving()) {
+                this.recentWallContact.recordContact(
+                    playerId,
+                    worldId,
+                    effectiveDirection
+                );
+            }
+        } else if (!this.confirmedSuppression.recordProbeMiss(playerId)) {
+            this.forgetMovementState(playerId);
+            return;
+        }
+
+        this.sendMotionReset(player, effectiveDirection);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onQuit(final PlayerQuitEvent event) {
         final UUID playerId = event.getPlayer().getUniqueId();
         this.recentActivity.forget(playerId);
-        this.confirmedSuppression.forget(playerId);
+        this.forgetMovementState(playerId);
         this.motionTracker.forget(playerId);
+    }
+
+    private void handleOutsideShallowWater(
+        final Player player,
+        final UUID playerId,
+        final UUID worldId,
+        final Location origin,
+        final HorizontalCollisionProbe.MovementDirection currentDirection
+    ) {
+        if (!this.confirmedSuppression.isConfirmed(playerId)) {
+            this.recentWallContact.forget(playerId);
+            return;
+        }
+        if (!this.confirmedSuppression.matchesWorld(playerId, worldId)
+            || !this.confirmedSuppression.recordAirborneRecoveryTick(
+                playerId,
+                worldId,
+                origin.getY()
+            )) {
+            this.forgetMovementState(playerId);
+            return;
+        }
+
+        final RecentWallContactTracker.DirectionResolution recentDirection =
+            this.recentWallContact.resolve(playerId, worldId, currentDirection);
+        final HorizontalCollisionProbe.MovementDirection effectiveDirection =
+            recentDirection.isAvailable()
+                ? recentDirection.direction()
+                : this.confirmedSuppression.direction(playerId);
+        this.sendMotionReset(player, effectiveDirection);
+    }
+
+    private void sendMotionReset(
+        final Player player,
+        final HorizontalCollisionProbe.MovementDirection direction
+    ) {
+        final ClientHorizontalMotionTracker.HorizontalMotion sentMotion =
+            this.motionTracker
+                .latest(player.getUniqueId())
+                .withoutOpposingComponents(direction)
+                .damped(this.movementDamping.forPlayer(player));
+        this.motionSuppressor.clearUpwardMotion(player, sentMotion);
+    }
+
+    private void forgetMovementState(final UUID playerId) {
+        this.confirmedSuppression.forget(playerId);
+        this.recentWallContact.forget(playerId);
     }
 
     private Location selectRollbackLocation(

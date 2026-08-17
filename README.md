@@ -21,10 +21,11 @@ The plugin has no commands, permissions, runtime dependencies, or per-world rest
 The generated `plugins/WaterloggedJumpFix/config.yml` contains:
 
 ```yaml
-prediction-distance: 0.0
+prediction-distance: 0.1
+time-lookahead-max-distance: 0.6
 ```
 
-The conservative default disables prediction. Motion suppression begins only after the unwanted jump has been positively identified and cancelled once. Set a small positive distance, such as `0.02`, to begin suppression when a collision is that many blocks ahead in the current input direction. This may prevent the first correction, but it can act on input that the player changes while packets are in flight. Accepted values are from `0.0` to `1.0` blocks.
+The plugin sweeps at least `prediction-distance` blocks ahead, then adds the player's recent horizontal distance per client tick multiplied by their ping in 50 ms ticks. `time-lookahead-max-distance` caps the result. This starts suppression early enough for delayed motion packets without making low-latency players use the same oversized fixed distance. Both values accept up to `2.0` blocks, and `prediction-distance` may be `0.0`.
 
 ## How it works
 
@@ -40,10 +41,10 @@ The cancellation is deliberately narrower than a general anti-jump plugin:
    - movement is not a collision-supported step within the player's effective step-height attribute;
    - the player's body is in water while their eyes remain above the surface; and
    - horizontal movement input that points into a collision.
-4. The first matching jump is cancelled and confirms suppression for that wall contact. The fallback correction keeps the newest collision-safe horizontal position and camera direction instead of returning X/Z to Paper's older movement-event location.
-5. At each `ClientTickEndEvent` while the confirmed condition remains true, the plugin sends a self-only motion packet with Y set to zero. The vanilla client prepares the unwanted `+0.3Y` water-exit impulse for its next tick, so this normally clears the impulse before it moves the camera and retriggers another rollback.
-6. Because the motion packet contains all three components, the plugin estimates X/Z from the player's latest client-tick displacement and reapplies vanilla's water damping. Diagonal movement along the wall is preserved rather than replaced with zero horizontal velocity.
-7. If `prediction-distance` is positive, the same client-side suppression can start shortly before the first confirmed jump.
+4. A swept collision probe uses the latency-adjusted distance to begin client-side suppression before contact. After a jump confirms the bug, a short contact and airborne-recovery window covers packet-ordering gaps without keeping suppression active after the player changes direction.
+5. Matching movement receives a self-only motion packet with Y set to zero. The vanilla client prepares the unwanted `+0.3Y` water-exit impulse for its next tick, so this normally clears the impulse before it moves the camera and retriggers another rollback.
+6. Because the motion packet contains all three components, the plugin reconstructs X/Z from the latest client-tick displacement, reapplies vanilla's water damping, and removes only stale components that oppose current input. Diagonal movement along the wall is preserved.
+7. If an unwanted jump still reaches Paper, it is cancelled using the newest collision-safe horizontal position and immediately followed by another motion reset.
 
 ## Build locally
 

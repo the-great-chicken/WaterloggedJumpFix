@@ -9,6 +9,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 public final class WaterloggedJumpFixPlugin extends JavaPlugin {
     private final RecentPlayerActivity recentActivity = new RecentPlayerActivity();
     private final ConfirmedSuppression confirmedSuppression = new ConfirmedSuppression();
+    private final RecentWallContactTracker recentWallContact =
+        new RecentWallContactTracker();
     private final ClientHorizontalMotionTracker motionTracker =
         new ClientHorizontalMotionTracker();
 
@@ -19,10 +21,12 @@ public final class WaterloggedJumpFixPlugin extends JavaPlugin {
             new WaterloggedJumpListener(
                 this.recentActivity,
                 this.confirmedSuppression,
+                this.recentWallContact,
                 this.motionTracker,
                 new ShallowWaterContactDetector(),
                 new HorizontalCollisionProbe(),
                 new LegitimateStepDetector(),
+                new CollisionLookahead(),
                 new WaterMovementDamping(),
                 new ClientMotionSuppressor(),
                 settings
@@ -31,8 +35,9 @@ public final class WaterloggedJumpFixPlugin extends JavaPlugin {
         );
 
         this.getLogger().info(
-            "MC-8959 workaround enabled globally (prediction-distance: "
-                + settings.predictionDistance() + ")."
+            "MC-8959 workaround enabled globally (latency-aware lookahead: "
+                + settings.predictionDistance() + " to "
+                + settings.timeLookaheadMaxDistance() + " blocks)."
         );
     }
 
@@ -40,6 +45,7 @@ public final class WaterloggedJumpFixPlugin extends JavaPlugin {
     public void onDisable() {
         this.recentActivity.clear();
         this.confirmedSuppression.clear();
+        this.recentWallContact.clear();
         this.motionTracker.clear();
     }
 }
