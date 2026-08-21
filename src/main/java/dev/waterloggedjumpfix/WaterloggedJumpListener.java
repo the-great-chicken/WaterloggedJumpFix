@@ -17,7 +17,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerVelocityEvent;
 import org.bukkit.potion.PotionEffectType;
 
-/** Applies latency-aware motion suppression and maintains its safety exemptions. */
+/** Applies predictive motion suppression and maintains its safety exemptions. */
 final class WaterloggedJumpListener implements Listener {
     private static final double CONFIRMED_CONTACT_PROBE_DISTANCE = 0.08D;
     private static final double MAX_SAFE_ROLLBACK_HORIZONTAL_DISTANCE_SQUARED =
@@ -30,6 +30,10 @@ final class WaterloggedJumpListener implements Listener {
     private final ShallowWaterContactDetector contactDetector;
     private final HorizontalCollisionProbe collisionProbe;
     private final LegitimateStepDetector stepDetector;
+    private final VanillaStepSimulator vanillaStepSimulator;
+    private final ProjectedStepSimulator projectedStepSimulator;
+    private final StepCandidateGate stepCandidateGate;
+    private final StepTransitionPermitTracker stepPermits;
     private final CollisionLookahead collisionLookahead;
     private final WaterMovementDamping movementDamping;
     private final ClientMotionSuppressor motionSuppressor;
@@ -43,6 +47,10 @@ final class WaterloggedJumpListener implements Listener {
         final ShallowWaterContactDetector contactDetector,
         final HorizontalCollisionProbe collisionProbe,
         final LegitimateStepDetector stepDetector,
+        final VanillaStepSimulator vanillaStepSimulator,
+        final ProjectedStepSimulator projectedStepSimulator,
+        final StepCandidateGate stepCandidateGate,
+        final StepTransitionPermitTracker stepPermits,
         final CollisionLookahead collisionLookahead,
         final WaterMovementDamping movementDamping,
         final ClientMotionSuppressor motionSuppressor,
@@ -55,6 +63,10 @@ final class WaterloggedJumpListener implements Listener {
         this.contactDetector = contactDetector;
         this.collisionProbe = collisionProbe;
         this.stepDetector = stepDetector;
+        this.vanillaStepSimulator = vanillaStepSimulator;
+        this.projectedStepSimulator = projectedStepSimulator;
+        this.stepCandidateGate = stepCandidateGate;
+        this.stepPermits = stepPermits;
         this.collisionLookahead = collisionLookahead;
         this.movementDamping = movementDamping;
         this.motionSuppressor = motionSuppressor;
@@ -108,7 +120,8 @@ final class WaterloggedJumpListener implements Listener {
         final Location origin = player.getLocation();
         final Location requested = event.getTo();
         if (this.stepDetector.isLegitimateStep(player, origin, requested)) {
-            this.forgetMovementState(playerId);
+            this.stepPermits.complete(playerId);
+            this.forgetSuppressionState(playerId);
             return;
         }
 
@@ -116,41 +129,61 @@ final class WaterloggedJumpListener implements Listener {
             return;
         }
 
+        final UUID worldId = player.getWorld().getUID();
         final HorizontalCollisionProbe.MovementDirection currentDirection =
-            HorizontalCollisionProbe.movementDirection(
-                requested.getYaw(),
-                input
-            );
+            HorizontalCollisionProbe.movementDirection(requested.getYaw(), input);
         final RecentWallContactTracker.DirectionResolution effectiveDirection =
             this.recentWallContact.resolve(
                 playerId,
-                player.getWorld().getUID(),
+                worldId,
                 currentDirection
             );
-        if (!effectiveDirection.isAvailable()
-            || !this.collisionProbe.isMovingIntoCollision(
-                player,
-                origin,
-                effectiveDirection.direction(),
-                CONFIRMED_CONTACT_PROBE_DISTANCE
-            )) {
+        if (!effectiveDirection.isAvailable()) {
+            return;
+        }
+
+        if (this.stepPermits.activate(
+            playerId,
+            worldId,
+            origin.getX(),
+            origin.getY(),
+            origin.getZ(),
+            effectiveDirection.direction()
+        )) {
+            this.forgetSuppressionState(playerId);
+            return;
+        }
+
+        if (!this.collisionProbe.isMovingIntoCollision(
+            player,
+            origin,
+            effectiveDirection.direction(),
+            CONFIRMED_CONTACT_PROBE_DISTANCE
+        )) {
             return;
         }
 
         this.confirmedSuppression.confirm(
             playerId,
-            player.getWorld().getUID(),
+            worldId,
             effectiveDirection.direction(),
             origin.getY()
         );
         this.recentWallContact.recordContact(
             playerId,
-            player.getWorld().getUID(),
+            worldId,
             effectiveDirection.direction()
         );
         event.setFrom(this.selectRollbackLocation(player, origin, requested));
         event.setCancelled(true);
         this.sendMotionReset(player, effectiveDirection.direction());
+        this.stepPermits.block(
+            playerId,
+            worldId,
+            origin.getX(),
+            origin.getZ(),
+            effectiveDirection.direction()
+        );
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -158,6 +191,7 @@ final class WaterloggedJumpListener implements Listener {
         final Player player = event.getPlayer();
         final UUID playerId = player.getUniqueId();
         this.recentWallContact.advanceClientTick(playerId);
+        this.stepPermits.advanceClientTick(playerId);
         final ClientHorizontalMotionTracker.HorizontalMotion horizontalMotion =
             this.motionTracker.observe(player);
         final int currentTick = Bukkit.getCurrentTick();
@@ -172,6 +206,10 @@ final class WaterloggedJumpListener implements Listener {
             || this.recentActivity.hasRecentJumpInput(playerId, currentTick)
             || this.recentActivity.hasRecentExternalVelocity(playerId, currentTick)) {
             this.forgetMovementState(playerId);
+            return;
+        }
+
+        if (this.handlePendingStepPermit(player, origin, worldId)) {
             return;
         }
 
@@ -199,6 +237,58 @@ final class WaterloggedJumpListener implements Listener {
                 currentDirection,
                 lookaheadDistance
             );
+        final double stepProbeDistance = Math.min(
+            this.settings.timeLookaheadMaxDistance(),
+            Math.max(lookaheadDistance, horizontalMotion.speed())
+        );
+        final VanillaStepSimulator.StepResult proactiveStep =
+            this.vanillaStepSimulator.assess(
+                player,
+                currentDirection,
+                stepProbeDistance
+            );
+        final ProjectedStepSimulator.StepResult projectedStep =
+            this.projectedStepSimulator.assess(
+                player,
+                origin,
+                currentDirection,
+                lookaheadDistance
+            );
+
+        if (this.stepCandidateGate.trustsVanillaStep(
+            this.confirmedSuppression.isConfirmed(playerId),
+            horizontalMotion,
+            proactiveStep
+        )) {
+            this.stepPermits.complete(playerId);
+            this.forgetSuppressionState(playerId);
+            return;
+        }
+
+        if (projectedStep.stepable()
+            && !this.stepPermits.isRearmBlocked(
+                playerId,
+                worldId,
+                origin.getX(),
+                origin.getZ(),
+                currentDirection
+            )
+            && this.stepCandidateGate.canArmProjectedStep(
+                horizontalMotion,
+                projectedStep
+            )) {
+            this.stepPermits.arm(
+                playerId,
+                worldId,
+                origin.getX(),
+                origin.getY(),
+                origin.getZ(),
+                currentDirection,
+                projectedStep
+            );
+            return;
+        }
+
         final boolean currentCollision = currentDirection.isMoving()
             && this.collisionProbe.isMovingIntoCollision(
                 player,
@@ -208,20 +298,14 @@ final class WaterloggedJumpListener implements Listener {
             );
 
         if (!this.confirmedSuppression.isConfirmed(playerId)) {
-            if (currentCollision) {
-                this.recentWallContact.recordContact(
-                    playerId,
-                    worldId,
-                    currentDirection
-                );
-            }
-            if (!predictedCollision.collision()) {
-                if (currentDirection.isMoving() && !currentCollision) {
-                    this.recentWallContact.forget(playerId);
-                }
-                return;
-            }
-            this.sendMotionReset(player, currentDirection);
+            this.handleUnconfirmedContact(
+                player,
+                origin,
+                currentDirection,
+                worldId,
+                currentCollision,
+                predictedCollision
+            );
             return;
         }
 
@@ -289,6 +373,78 @@ final class WaterloggedJumpListener implements Listener {
         this.motionTracker.forget(playerId);
     }
 
+    private boolean handlePendingStepPermit(
+        final Player player,
+        final Location origin,
+        final UUID worldId
+    ) {
+        final UUID playerId = player.getUniqueId();
+        if (!this.stepPermits.isArmed(playerId)
+            && !this.stepPermits.isActive(playerId)) {
+            return false;
+        }
+
+        if (!this.stepPermits.matchesWorld(playerId, worldId)) {
+            this.forgetMovementState(playerId);
+            return true;
+        }
+
+        final Location supportProbe = origin.clone().subtract(0.0D, 0.05D, 0.0D);
+        final boolean supported = player.isOnGround()
+            || player.collidesAt(supportProbe);
+        if (this.stepPermits.hasReachedTarget(
+            playerId,
+            origin.getY(),
+            supported
+        )) {
+            this.stepPermits.complete(playerId);
+            this.forgetSuppressionState(playerId);
+            return true;
+        }
+
+        if (this.stepPermits.isArmedExpired(playerId)
+            || this.stepPermits.isActiveExpired(playerId)) {
+            final HorizontalCollisionProbe.MovementDirection direction =
+                this.stepPermits.direction(playerId);
+            this.sendMotionReset(player, direction);
+            this.stepPermits.block(
+                playerId,
+                worldId,
+                origin.getX(),
+                origin.getZ(),
+                direction
+            );
+        }
+        return true;
+    }
+
+    private void handleUnconfirmedContact(
+        final Player player,
+        final Location origin,
+        final HorizontalCollisionProbe.MovementDirection currentDirection,
+        final UUID worldId,
+        final boolean currentCollision,
+        final HorizontalCollisionProbe.CollisionResult predictedCollision
+    ) {
+        final UUID playerId = player.getUniqueId();
+        if (currentCollision) {
+            this.recentWallContact.recordContact(
+                playerId,
+                worldId,
+                currentDirection
+            );
+        }
+
+        if (!predictedCollision.collision()) {
+            if (currentDirection.isMoving() && !currentCollision) {
+                this.recentWallContact.forget(playerId);
+            }
+            return;
+        }
+
+        this.sendMotionReset(player, currentDirection);
+    }
+
     private void handleOutsideShallowWater(
         final Player player,
         final UUID playerId,
@@ -311,7 +467,11 @@ final class WaterloggedJumpListener implements Listener {
         }
 
         final RecentWallContactTracker.DirectionResolution recentDirection =
-            this.recentWallContact.resolve(playerId, worldId, currentDirection);
+            this.recentWallContact.resolve(
+                playerId,
+                worldId,
+                currentDirection
+            );
         final HorizontalCollisionProbe.MovementDirection effectiveDirection =
             recentDirection.isAvailable()
                 ? recentDirection.direction()
@@ -332,6 +492,11 @@ final class WaterloggedJumpListener implements Listener {
     }
 
     private void forgetMovementState(final UUID playerId) {
+        this.forgetSuppressionState(playerId);
+        this.stepPermits.forget(playerId);
+    }
+
+    private void forgetSuppressionState(final UUID playerId) {
         this.confirmedSuppression.forget(playerId);
         this.recentWallContact.forget(playerId);
     }

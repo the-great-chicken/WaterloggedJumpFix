@@ -90,6 +90,10 @@ final class HorizontalCollisionProbe {
                 && Double.isFinite(this.z)
                 && (this.x != 0.0D || this.z != 0.0D);
         }
+
+        double dot(final MovementDirection other) {
+            return this.x * other.x + this.z * other.z;
+        }
     }
 
     record CollisionResult(boolean collision, double distance) {
