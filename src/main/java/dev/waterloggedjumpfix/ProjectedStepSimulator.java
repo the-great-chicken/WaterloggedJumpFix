@@ -27,13 +27,20 @@ final class ProjectedStepSimulator {
             return StepResult.NONE;
         }
 
+        final double originX = origin.getX();
+        final double originY = origin.getY();
+        final double originZ = origin.getZ();
+        final Location probe = origin.clone();
         return simulate(
             direction,
             distance,
             stepHeightAttribute.getValue(),
-            (x, y, z) -> player.collidesAt(
-                origin.clone().add(x, y, z)
-            )
+            (x, y, z) -> {
+                probe.setX(originX + x);
+                probe.setY(originY + y);
+                probe.setZ(originZ + z);
+                return player.collidesAt(probe);
+            }
         );
     }
 

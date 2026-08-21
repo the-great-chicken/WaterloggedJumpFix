@@ -9,6 +9,13 @@ final class StepCandidateGate {
     private static final double PROJECTED_REACH_PADDING = 0.025D;
     private static final double MAX_PROJECTED_RELEASE_DISTANCE = 0.2D;
 
+    double projectedProbeDistance(final double requestedDistance) {
+        if (!Double.isFinite(requestedDistance) || requestedDistance <= 0.0D) {
+            return 0.0D;
+        }
+        return Math.min(requestedDistance, MAX_PROJECTED_RELEASE_DISTANCE);
+    }
+
     boolean trustsVanillaStep(
         final boolean confirmedSuppression,
         final ClientHorizontalMotionTracker.HorizontalMotion motion,

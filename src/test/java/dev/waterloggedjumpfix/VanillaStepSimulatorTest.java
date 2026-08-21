@@ -16,8 +16,6 @@ class VanillaStepSimulatorTest {
     void acceptsResolvedHorizontalMovementWithAnUpwardStep() {
         assertTrue(
             VanillaStepSimulator.fromResolvedMovement(
-                0.1D,
-                0.1D,
                 0.08D,
                 0.5D,
                 0.08D
@@ -31,15 +29,11 @@ class VanillaStepSimulatorTest {
             VanillaStepSimulator.fromResolvedMovement(
                 0.1D,
                 0.0D,
-                0.1D,
-                0.0D,
                 0.0D
             ).stepable()
         );
         assertFalse(
             VanillaStepSimulator.fromResolvedMovement(
-                0.1D,
-                0.0D,
                 0.0D,
                 0.5D,
                 0.0D

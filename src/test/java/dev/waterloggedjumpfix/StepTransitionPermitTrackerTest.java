@@ -62,6 +62,28 @@ class StepTransitionPermitTrackerTest {
     }
 
     @Test
+    void activePermitExpiresAfterItsLandingWindow() {
+        this.arm();
+        assertTrue(
+            this.tracker.activate(
+                this.playerId,
+                this.worldId,
+                10.0D,
+                100.5D,
+                20.0D,
+                this.direction
+            )
+        );
+        for (int tick = 0;
+            tick <= StepTransitionPermitTracker.MAX_ACTIVE_CLIENT_TICKS;
+            tick++) {
+            this.tracker.advanceClientTick(this.playerId);
+        }
+
+        assertTrue(this.tracker.isActiveExpired(this.playerId));
+    }
+
+    @Test
     void recognizesSupportedArrivalAtThePredictedHeight() {
         this.arm();
 
@@ -98,6 +120,57 @@ class StepTransitionPermitTrackerTest {
                 this.direction
             )
         );
+    }
+
+    @Test
+    void releasingInputClearsARejectedAttempt() {
+        this.tracker.block(
+            this.playerId,
+            this.worldId,
+            10.0D,
+            20.0D,
+            this.direction
+        );
+        final var noDirection =
+            new HorizontalCollisionProbe.MovementDirection(0.0D, 0.0D);
+
+        assertFalse(
+            this.tracker.isRearmBlocked(
+                this.playerId,
+                this.worldId,
+                10.0D,
+                20.0D,
+                noDirection
+            )
+        );
+        assertFalse(
+            this.tracker.isRearmBlocked(
+                this.playerId,
+                this.worldId,
+                10.0D,
+                20.0D,
+                this.direction
+            )
+        );
+    }
+
+    @Test
+    void activationRejectsAChangedDirection() {
+        this.arm();
+        final var oppositeDirection =
+            new HorizontalCollisionProbe.MovementDirection(0.0D, -1.0D);
+
+        assertFalse(
+            this.tracker.activate(
+                this.playerId,
+                this.worldId,
+                10.0D,
+                100.5D,
+                20.0D,
+                oppositeDirection
+            )
+        );
+        assertFalse(this.tracker.isArmed(this.playerId));
     }
 
     private void arm() {

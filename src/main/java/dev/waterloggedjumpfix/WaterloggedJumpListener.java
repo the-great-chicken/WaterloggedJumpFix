@@ -8,12 +8,15 @@ import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Input;
 import org.bukkit.Location;
+import org.bukkit.craftbukkit.entity.CraftPlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerInputEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
+import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.player.PlayerVelocityEvent;
 import org.bukkit.potion.PotionEffectType;
 
@@ -252,7 +255,7 @@ final class WaterloggedJumpListener implements Listener {
                 player,
                 origin,
                 currentDirection,
-                lookaheadDistance
+                this.stepCandidateGate.projectedProbeDistance(lookaheadDistance)
             );
 
         if (this.stepCandidateGate.trustsVanillaStep(
@@ -265,14 +268,15 @@ final class WaterloggedJumpListener implements Listener {
             return;
         }
 
+        final boolean rearmBlocked = this.stepPermits.isRearmBlocked(
+            playerId,
+            worldId,
+            origin.getX(),
+            origin.getZ(),
+            currentDirection
+        );
         if (projectedStep.stepable()
-            && !this.stepPermits.isRearmBlocked(
-                playerId,
-                worldId,
-                origin.getX(),
-                origin.getZ(),
-                currentDirection
-            )
+            && !rearmBlocked
             && this.stepCandidateGate.canArmProjectedStep(
                 horizontalMotion,
                 projectedStep
@@ -367,7 +371,21 @@ final class WaterloggedJumpListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onQuit(final PlayerQuitEvent event) {
-        final UUID playerId = event.getPlayer().getUniqueId();
+        this.forgetPlayer(event.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onTeleport(final PlayerTeleportEvent event) {
+        this.forgetPlayer(event.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onRespawn(final PlayerRespawnEvent event) {
+        this.forgetPlayer(event.getPlayer());
+    }
+
+    private void forgetPlayer(final Player player) {
+        final UUID playerId = player.getUniqueId();
         this.recentActivity.forget(playerId);
         this.forgetMovementState(playerId);
         this.motionTracker.forget(playerId);
@@ -390,7 +408,7 @@ final class WaterloggedJumpListener implements Listener {
         }
 
         final Location supportProbe = origin.clone().subtract(0.0D, 0.05D, 0.0D);
-        final boolean supported = player.isOnGround()
+        final boolean supported = ((CraftPlayer) player).getHandle().onGround()
             || player.collidesAt(supportProbe);
         if (this.stepPermits.hasReachedTarget(
             playerId,

@@ -1,5 +1,6 @@
 package dev.waterloggedjumpfix;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -16,8 +17,6 @@ class StepCandidateGateTest {
         );
         final var step = new VanillaStepSimulator.StepResult(
             true,
-            -0.20749D,
-            0.20555D,
             -0.04794D,
             0.5D,
             0.20555D
@@ -30,8 +29,6 @@ class StepCandidateGateTest {
     void rejectsPostRollbackVanillaStepWithoutProgress() {
         final var step = new VanillaStepSimulator.StepResult(
             true,
-            -0.06899D,
-            0.07239D,
             0.0D,
             0.5D,
             0.07239D
@@ -96,5 +93,13 @@ class StepCandidateGateTest {
         );
 
         assertFalse(this.gate.canArmProjectedStep(motion, step));
+    }
+
+    @Test
+    void limitsProjectedSimulationToDistancesTheGateCanAccept() {
+        assertEquals(0.1D, this.gate.projectedProbeDistance(0.1D));
+        assertEquals(0.2D, this.gate.projectedProbeDistance(0.6D));
+        assertEquals(0.0D, this.gate.projectedProbeDistance(Double.NaN));
+        assertEquals(0.0D, this.gate.projectedProbeDistance(-0.1D));
     }
 }
