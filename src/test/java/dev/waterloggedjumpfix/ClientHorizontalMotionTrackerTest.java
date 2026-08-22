@@ -71,6 +71,57 @@ class ClientHorizontalMotionTrackerTest {
     }
 
     @Test
+    void retainsTheFasterOfTheTwoMostRecentCompatibleMotions() {
+        this.tracker.observe(this.playerId, this.worldId, 0.0D, 0.0D);
+        this.tracker.observe(this.playerId, this.worldId, 0.18D, 0.04D);
+        this.tracker.observe(this.playerId, this.worldId, 0.19D, 0.05D);
+        final var direction = new HorizontalCollisionProbe.MovementDirection(
+            1.0D,
+            0.0D
+        );
+
+        assertMotion(
+            0.18D,
+            0.04D,
+            this.tracker.bestRecent(this.playerId, direction)
+        );
+    }
+
+    @Test
+    void retainedMotionStillDropsComponentsOpposingCurrentInput() {
+        this.tracker.observe(this.playerId, this.worldId, 0.0D, 0.0D);
+        this.tracker.observe(this.playerId, this.worldId, -0.18D, 0.04D);
+        this.tracker.observe(this.playerId, this.worldId, -0.19D, 0.05D);
+        final var direction = new HorizontalCollisionProbe.MovementDirection(
+            1.0D,
+            0.0D
+        );
+
+        assertMotion(
+            0.0D,
+            0.04D,
+            this.tracker.bestRecent(this.playerId, direction)
+        );
+    }
+
+    @Test
+    void retainedMotionDoesNotReverseTheLatestTangentialMovement() {
+        this.tracker.observe(this.playerId, this.worldId, 0.0D, 0.0D);
+        this.tracker.observe(this.playerId, this.worldId, 0.18D, 0.04D);
+        this.tracker.observe(this.playerId, this.worldId, 0.17D, 0.05D);
+        final var direction = new HorizontalCollisionProbe.MovementDirection(
+            0.0D,
+            1.0D
+        );
+
+        assertMotion(
+            -0.01D,
+            0.01D,
+            this.tracker.bestRecent(this.playerId, direction)
+        );
+    }
+
+    @Test
     void worldChangeDoesNotBecomeVelocity() {
         this.tracker.observe(this.playerId, this.worldId, 10.0D, 20.0D);
 
@@ -78,6 +129,14 @@ class ClientHorizontalMotionTrackerTest {
             this.tracker.observe(this.playerId, UUID.randomUUID(), 2.0D, 3.0D);
 
         assertMotion(0.0D, 0.0D, motion);
+        assertMotion(
+            0.0D,
+            0.0D,
+            this.tracker.bestRecent(
+                this.playerId,
+                new HorizontalCollisionProbe.MovementDirection(1.0D, 0.0D)
+            )
+        );
     }
 
     @Test

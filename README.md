@@ -41,11 +41,12 @@ The cancellation is deliberately narrower than a general anti-jump plugin:
    - movement is not a collision-supported step within the player's effective step-height attribute;
    - the player's body is in water while their eyes remain above the surface; and
    - horizontal movement input that points into a collision.
-4. A swept collision probe uses the latency-adjusted distance to begin client-side suppression before contact. A separate step simulation recognizes reachable ledges, including a step encountered while sliding past an adjacent taller wall, and briefly permits that transition.
+4. A swept collision probe uses the latency-adjusted distance to begin client-side suppression before contact. A separate step simulation predicts the exact top of reachable ledges, including a step encountered while sliding past an adjacent taller wall. Stable repeated geometry can arm a step even after suppression has removed measurable horizontal progress.
 5. After a jump confirms the bug, a short contact and airborne-recovery window covers packet-ordering gaps without keeping suppression active after the player changes direction.
 6. Matching movement receives a self-only motion packet with Y set to zero. The vanilla client prepares the unwanted `+0.3Y` water-exit impulse for its next tick, so this normally clears the impulse before it moves the camera and retriggers another rollback.
 7. Because the motion packet contains all three components, the plugin reconstructs X/Z from the latest client-tick displacement, reapplies vanilla's water damping, and removes only stale components that oppose current input. Diagonal movement along the wall is preserved.
-8. If an unwanted jump still reaches Paper, it is cancelled using the newest collision-safe horizontal position and immediately followed by another motion reset.
+8. If a predicted step produces the client's automatic jump, the plugin cancels it with Paper's authoritative rollback target set to the validated step top, then restores safe retained horizontal motion on the next server tick. A short revalidated fallback lands the step if no jump event arrives.
+9. Any remaining unwanted jump is cancelled using the newest collision-safe horizontal position and immediately followed by another motion reset.
 
 ## Build locally
 
@@ -65,4 +66,4 @@ Unit tests run as part of `build` and of the GitHub Actions workflow.
 
 ## Publish a release
 
-Set `pluginVersion` in `gradle.properties`, commit the change, and push a matching tag such as `v1.4.0`. The GitHub Actions workflow validates the tag, runs the tests, builds the versioned JAR, and attaches it to a GitHub Release. Re-running the workflow replaces the existing JAR asset.
+Set `pluginVersion` in `gradle.properties`, commit the change to `main`, and push it. The GitHub Actions workflow runs the tests, builds the versioned JAR, creates the matching tag, and publishes the GitHub Release if it does not already exist.

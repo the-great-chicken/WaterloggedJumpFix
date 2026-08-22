@@ -15,12 +15,15 @@ public final class WaterloggedJumpFixPlugin extends JavaPlugin {
         new ClientHorizontalMotionTracker();
     private final StepTransitionPermitTracker stepPermits =
         new StepTransitionPermitTracker();
+    private final StableStepCandidateTracker stableStepCandidates =
+        new StableStepCandidateTracker();
 
     @Override
     public void onEnable() {
         final PluginSettings settings = PluginSettings.load(this);
         this.getServer().getPluginManager().registerEvents(
             new WaterloggedJumpListener(
+                this,
                 this.recentActivity,
                 this.confirmedSuppression,
                 this.recentWallContact,
@@ -32,6 +35,7 @@ public final class WaterloggedJumpFixPlugin extends JavaPlugin {
                 new ProjectedStepSimulator(),
                 new StepCandidateGate(),
                 this.stepPermits,
+                this.stableStepCandidates,
                 new CollisionLookahead(),
                 new WaterMovementDamping(),
                 new ClientMotionSuppressor(),
@@ -54,5 +58,6 @@ public final class WaterloggedJumpFixPlugin extends JavaPlugin {
         this.recentWallContact.clear();
         this.motionTracker.clear();
         this.stepPermits.clear();
+        this.stableStepCandidates.clear();
     }
 }
